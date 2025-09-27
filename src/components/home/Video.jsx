@@ -6,6 +6,7 @@ const Video = () => {
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   // Detect mobile devices for optimized video serving
   useEffect(() => {
@@ -25,33 +26,56 @@ const Video = () => {
     const video = videoRef.current;
     if (!video) return;
 
-    // Force video properties for iOS Safari compatibility
-    const setupVideoForSafari = () => {
+    // OPTIMIZATION 1: Immediate video setup for faster playback
+    const setupVideoForImmediatePlay = () => {
       video.muted = true; // CRITICAL: Must be set before autoplay
       video.playsInline = true;
       video.setAttribute('webkit-playsinline', 'true');
       video.setAttribute('x-webkit-airplay', 'allow');
       video.defaultMuted = true;
       video.volume = 0;
+      // OPTIMIZATION 2: Hardware acceleration for smooth playback
+      video.style.transform = 'translate3d(0,0,0)';
+      video.style.webkitTransform = 'translate3d(0,0,0)';
+      video.style.backfaceVisibility = 'hidden';
+      video.style.webkitBackfaceVisibility = 'hidden';
     };
 
     // Handle video load events
     const handleLoadedData = () => {
-      setupVideoForSafari();
+      setupVideoForImmediatePlay();
       setIsLoaded(true);
       
-      // Attempt to play video
-      const playPromise = video.play();
-      if (playPromise !== undefined) {
-        playPromise
-          .then(() => {
-            console.log('Video autoplay successful');
-          })
-          .catch(error => {
-            console.warn('Video autoplay failed:', error);
-            // Fallback: try to play on user interaction
-            handleAutoplayFailure();
-          });
+      // OPTIMIZATION 3: Multiple immediate play attempts
+      attemptImmediatePlay();
+    };
+
+    // OPTIMIZATION 4: Aggressive immediate playback strategy
+    const attemptImmediatePlay = () => {
+      const playStrategies = [
+        () => directPlay(),
+        () => setTimeout(() => directPlay(), 50),
+        () => setTimeout(() => directPlay(), 100),
+        () => setTimeout(() => directPlay(), 200)
+      ];
+      
+      playStrategies.forEach(strategy => strategy());
+    };
+
+    const directPlay = () => {
+      if (video.paused) {
+        const playPromise = video.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log('Video autoplay successful');
+              setIsPlaying(true);
+            })
+            .catch(error => {
+              console.warn('Video autoplay failed:', error);
+              handleAutoplayFailure();
+            });
+        }
       }
     };
 
@@ -60,9 +84,11 @@ const Video = () => {
       const playOnInteraction = () => {
         const playPromise = video.play();
         if (playPromise !== undefined) {
-          playPromise.catch(error => {
-            console.warn('Manual video play failed:', error);
-          });
+          playPromise
+            .then(() => setIsPlaying(true))
+            .catch(error => {
+              console.warn('Manual video play failed:', error);
+            });
         }
         
         // Remove event listeners after successful play
@@ -85,21 +111,37 @@ const Video = () => {
 
     // Handle video metadata load
     const handleLoadedMetadata = () => {
-      setupVideoForSafari();
+      setupVideoForImmediatePlay();
       // Ensure proper aspect ratio is maintained
       if (video.videoWidth && video.videoHeight) {
         const aspectRatio = video.videoWidth / video.videoHeight;
         video.style.aspectRatio = aspectRatio.toString();
       }
+      // OPTIMIZATION 5: Immediate play attempt on metadata load
+      setTimeout(() => attemptImmediatePlay(), 10);
+    };
+
+    // OPTIMIZATION 6: Track playing state for glow effects
+    const handlePlay = () => {
+      setIsPlaying(true);
+    };
+
+    const handlePause = () => {
+      setIsPlaying(false);
     };
 
     // Add event listeners
     video.addEventListener('loadeddata', handleLoadedData);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('error', handleError);
+    video.addEventListener('play', handlePlay);
+    video.addEventListener('pause', handlePause);
 
     // Initial setup
-    setupVideoForSafari();
+    setupVideoForImmediatePlay();
+    
+    // OPTIMIZATION 7: Immediate setup attempt
+    setTimeout(() => attemptImmediatePlay(), 0);
 
     // Cleanup
     return () => {
@@ -107,6 +149,8 @@ const Video = () => {
         video.removeEventListener('loadeddata', handleLoadedData);
         video.removeEventListener('loadedmetadata', handleLoadedMetadata);
         video.removeEventListener('error', handleError);
+        video.removeEventListener('play', handlePlay);
+        video.removeEventListener('pause', handlePause);
       }
     };
   }, []);
@@ -152,7 +196,7 @@ const Video = () => {
   return (
     <div 
       ref={containerRef}
-      className="hero-video-container h-full w-full relative overflow-hidden"
+      className={`hero-video-container h-full w-full relative overflow-hidden ${isPlaying ? 'video-playing' : ''}`}
       style={{
         // Prevent layout shift during load
         minHeight: '100vh',
@@ -178,14 +222,18 @@ const Video = () => {
       {/* Main background video with multiple sources for cross-browser compatibility */}
       <video
         ref={videoRef}
-        className="hero-background-video absolute inset-0 w-full h-full object-cover z-10"
+        className={`hero-background-video absolute inset-0 w-full h-full object-cover z-10 ${isPlaying ? 'playing' : ''}`}
         style={{
           objectFit: 'cover',
           objectPosition: 'center center',
           width: '100%',
           height: '100%',
           opacity: isLoaded && !hasError ? 1 : 0,
-          transition: 'opacity 0.5s ease-in-out'
+          transition: 'opacity 0.5s ease-in-out',
+          // OPTIMIZATION 8: Hardware acceleration
+          transform: 'translate3d(0,0,0)',
+          backfaceVisibility: 'hidden',
+          willChange: 'transform'
         }}
         // CRITICAL iOS Safari attributes - order matters!
         muted
@@ -193,9 +241,11 @@ const Video = () => {
         autoPlay
         playsInline
         loop
-        preload="metadata"
+        preload="auto"
         webkit-playsinline="true"
         x-webkit-airplay="allow"
+        disablePictureInPicture
+        controlsList="nodownload nofullscreen noremoteplayback"
         onError={(e) => {
           console.warn('Video element error:', e);
           setHasError(true);
@@ -210,13 +260,6 @@ const Video = () => {
         )}
         
         {/* Mobile-optimized MP4 for devices < 768px */}
-        <source
-          src="/video-720.mp4"
-          type="video/mp4"
-          media="(max-width: 767px)"
-        />
-        
-        {/* Standard MP4 for desktop and fallback */}
         <source
           src="/video.mp4"
           type="video/mp4"
